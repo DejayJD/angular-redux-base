@@ -1,0 +1,23 @@
+{
+  "name": "angular-redux-base",
+  "version": "1.0.0",
+  "description": "A wrapper implementation of @angular-redux/store that simplifies application logic.",
+  "main": "BaseReduxStore.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DejayJD/angular-redux-base.git"
+  },
+  "keywords": [
+    "angular",
+    "redux"
+  ],
+  "author": "JD Francis",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/DejayJD/angular-redux-base/issues"
+  },
+  "homepage": "https://github.com/DejayJD/angular-redux-base#readme"
+}
