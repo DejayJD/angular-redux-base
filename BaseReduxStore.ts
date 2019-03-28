@@ -92,11 +92,6 @@ export abstract class BaseReduxStore {
             if (!_.isNil(successReducer) && _.isNil(requestReducer) && !async) {
               requestAction = successReducer;
             }
-            //I added this case, because I kept thinking, I want to overload my reducer action when its finished "on success"
-            //However there is no success state for non-async actions so I added this for when you accidentally used a success reducer
-            if (!_.isNil(successReducer) && _.isNil(requestReducer) && !async) {
-              requestAction = successReducer;
-            }
             return requestAction(state, action);
 
           case actionSuccess: //Success action only applies to ASYNC actions
@@ -124,16 +119,15 @@ export abstract class BaseReduxStore {
     };
 
 
-    // we are not using arrow function, because there no arguments binding
-    // https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Functions/Arrow_functions
+    // Not using arrow function, because need args binding here
     const action = function () {
-      //First we get our action response, should be formatted like the following:
       const args = arguments;
-      /* { storeIndex, actionData}  */
       let storeIndex;
       try {
+        //First we get our action response, should be formatted like the following:
+        /* { storeIndex, actionData}  */
         let actionResponse: ReduxParameters = actionFunction.apply(null, args);
-        storeIndex = actionResponse.storeIndex || null;
+        storeIndex = actionResponse.storeIndex || null; //StoreIndex is where the data will be stored
         let actionData = actionResponse.actionData;
         let routeOnFinish = actionResponse.routeOnFinish;
         let routeOnError = actionResponse.routeOnError;
@@ -146,6 +140,7 @@ export abstract class BaseReduxStore {
               storeIndex: storeIndex
             });
             actionData.then(data => {
+                //Async request is successful
                 this.ngRedux.dispatch({
                   type: actionSuccess,
                   storeIndex: storeIndex,
@@ -155,6 +150,7 @@ export abstract class BaseReduxStore {
                 });
               }
             )
+              //Caught async error
               .catch(error => {
                 this.ngRedux.dispatch({
                   type: actionFailure,
@@ -222,7 +218,6 @@ export abstract class BaseReduxStore {
           }
           if (!_.isNil(action.newRoute)) {
             this.router.navigateByUrl(action.newRoute);
-            // newState.router = action.newRoute;
           }
           return _.cloneDeep(_.merge(state, newState));
         }
