@@ -1,5 +1,5 @@
-import * as _ from 'lodash';
-import {NgRedux} from '@angular-redux/store';
+import * as _            from 'lodash';
+import {NgRedux}         from '@angular-redux/store';
 import {
   asyncFailureAction,
   asyncInitialState,
@@ -8,8 +8,9 @@ import {
   nonAsyncFailureAction,
   nonAsyncInitialState,
   nonAsyncRequestAction
-} from './action-types';
-import {Router} from '@angular/router';
+}                        from './action-types';
+import {Router}          from '@angular/router';
+import {XmlParseService} from '../../shared/services/xml-parse.service';
 
 export interface ReduxActionType {
   request: string;
@@ -36,7 +37,7 @@ export class ReduxParameters {
         {storeIndex: 'currentDistributor'}
         {storeIndex: null} <-- in this case, you can just omit storeIndex entirely
   */
-  storeIndex?: string;
+  storeIndex?: string | object;
   /*  actionData will be whatever action function you are desiring
       Possible values: function returning a promise, normal function, or just data
       Example Values:
@@ -61,7 +62,9 @@ export class ReduxParameters {
 }
 
 export abstract class BaseReduxStore {
-  constructor(protected ngRedux: NgRedux<any>, protected router: Router) {
+  constructor(protected ngRedux: NgRedux<any>,
+              protected router: Router,
+              protected xmlParseService: XmlParseService) {
   }
 
   reduxBuilder(actionName: string,
@@ -74,6 +77,7 @@ export abstract class BaseReduxStore {
     const actionSuccess = actionName + '_SUCCESS';
     const actionFailure = actionName + '_FAILURE';
     const initialState = async ? asyncInitialState : nonAsyncInitialState;
+
     const reducer = (state = initialState, action) => {
       //Init failure Action before the switch statement, so that we can use it if either our Request/Success reducers fail
       let failureAction: Function = async ? asyncFailureAction : nonAsyncFailureAction;
@@ -115,7 +119,7 @@ export abstract class BaseReduxStore {
       } catch (e) {
         console.error(`Error in Reducer ${action.type}. Data:`, {error: e, action: action});
         action.error = e.message;
-        if (action.type = actionFailure) {
+        if (action.type == actionFailure) {
           //If the error is with the failure function, we just use a default error reducer instead
           failureAction = async ? asyncFailureAction : nonAsyncFailureAction;
         }
@@ -127,73 +131,98 @@ export abstract class BaseReduxStore {
     // we are not using arrow function, because there no arguments binding
     // https://developer.mozilla.org/en/docs/Web/JavaScript/Reference/Functions/Arrow_functions
     const action = function () {
-      //First we get our action response, should be formatted like the following:
+
       const args = arguments;
-      /* { storeIndex, actionData}  */
-      let storeIndex;
-      try {
-        let actionResponse: ReduxParameters = actionFunction.apply(null, args);
-        storeIndex = actionResponse.storeIndex || null;
-        let actionData = actionResponse.actionData;
-        let routeOnFinish = actionResponse.routeOnFinish;
-        let routeOnError = actionResponse.routeOnError;
-        let successParam = actionResponse.successParam;
-        if (!_.isNil(actionData)) {
-          // If it's an async promise, then we wait for the promise before checking success/failure
-          if (typeof actionData.then === 'function') { //.then is a function means a promise
-            this.ngRedux.dispatch({
-              type: actionRequest,
-              storeIndex: storeIndex
-            });
-            actionData.then(data => {
-                this.ngRedux.dispatch({
-                  type: actionSuccess,
-                  storeIndex: storeIndex,
-                  newRoute: routeOnFinish,
-                  successParam:successParam,
-                  data
-                });
-              }
-            )
-              .catch(error => {
-                this.ngRedux.dispatch({
-                  type: actionFailure,
-                  storeIndex: storeIndex,
-                  error
-                });
+      return new Promise<any>((resolve, reject) => {
+        //First we get our action response, should be formatted like the following:
+        /* { storeIndex, actionData}  */
+        let storeIndex;
+        try {
+          let actionResponse: ReduxParameters = actionFunction.apply(null, args);
+          storeIndex = actionResponse.storeIndex || null;
+          let actionData = actionResponse.actionData;
+          let routeOnFinish = actionResponse.routeOnFinish;
+          let routeOnError = actionResponse.routeOnError;
+          let successParam = actionResponse.successParam;
+          if (!_.isNil(actionData)) {
+            // If it's an async promise, then we wait for the promise before checking success/failure
+            if (typeof actionData.then === 'function') { //.then is a function means a promise
+              this.ngRedux.dispatch({
+                type: actionRequest,
+                storeIndex: storeIndex
               });
-          } else {
-            // Action returned is non-async function
-            let data = actionData; //The format can either be a function or just an object
-            if (typeof actionData === 'function') {
-              data = actionData(); //Evaluate function if this is the case
+              actionData.then(data => {
+                  let xmlParsedData = this.xmlParseService.parseServiceResponse(data);
+                  let status = 'OK';
+                  try {
+                    status = xmlParsedData.statusData.Response.Status;
+                  } catch (e) {
+                  }
+                  if (status == 'OK') {
+                    this.ngRedux.dispatch({
+                      type: actionSuccess,
+                      storeIndex: storeIndex,
+                      newRoute: routeOnFinish,
+                      successParam: successParam,
+                      data: xmlParsedData.responseData
+                    });
+                    resolve(xmlParsedData.responseData);
+                  } else {
+                    let error = xmlParsedData.statusData.Response.Exception;
+                    this.ngRedux.dispatch({
+                      type: actionFailure,
+                      storeIndex: storeIndex,
+                      data: xmlParsedData,
+                      error
+                    });
+                    reject(error);
+                  }
+                }
+              )
+                .catch(error => {
+                  this.ngRedux.dispatch({
+                    type: actionFailure,
+                    storeIndex: storeIndex,
+                    error
+                  });
+                  reject(error);
+                });
+            } else {
+              // Action returned is non-async function
+              let data = actionData; //The format can either be a function or just an object
+              if (typeof actionData === 'function') {
+                data = actionData(); //Evaluate function if this is the case
+              }
+              this.ngRedux.dispatch({
+                type: actionRequest,
+                newRoute: routeOnFinish,
+                successParam: successParam,
+                storeIndex: storeIndex,
+                data
+              });
+              resolve(data);
             }
+          } else { //The data returned is null
             this.ngRedux.dispatch({
               type: actionRequest,
               newRoute: routeOnFinish,
-              successParam:successParam,
+              successParam: successParam,
               storeIndex: storeIndex,
-              data
+              data: null
             });
+            resolve(null);
           }
-        } else { //The data returned is null
+          // If its not a promise, we really dont want to see "_SUCCESS" just return the try/catch error results
+        } catch (error) {
+          console.error(error.message);
           this.ngRedux.dispatch({
-            type: actionRequest,
-            newRoute: routeOnFinish,
-            successParam:successParam,
+            type: actionFailure,
             storeIndex: storeIndex,
-            data: null
+            error: error.message
           });
+          reject(error);
         }
-        // If its not a promise, we really dont want to see "_SUCCESS" just return the try/catch error results
-      } catch (error) {
-        console.log(error.message);
-        this.ngRedux.dispatch({
-          type: actionFailure,
-          storeIndex: storeIndex,
-          error: error.message
-        });
-      }
+      });
     }.bind(this);
     return new ReduxAction(
       action,
@@ -218,13 +247,36 @@ export abstract class BaseReduxStore {
         if (Object.values(prop.actionTypes).find(type => type === action.type)) {
           let newState = prop.reducer(state, action);
           if (!_.isNil(action.storeIndex)) {
-            newState = {[action.storeIndex]: newState};
+            let storeIndex = action.storeIndex;
+            if (typeof storeIndex === 'object') {
+              try {
+                storeIndex = storeIndex['_name'];
+              }
+              catch (e) {
+                console.error('Invalid storeIndex object type given. Objects should have property _name as their store index. Object given: ', storeIndex);
+                console.error(e);
+              }
+            }
+            newState = {[storeIndex]: newState};
           }
           if (!_.isNil(action.newRoute)) {
             this.router.navigateByUrl(action.newRoute);
             // newState.router = action.newRoute;
           }
-          return _.cloneDeep(_.merge(state, newState));
+
+          //Return a new object into the store. This must be cloned in order for the change detection cycle to kick off all the ngRedux.selects
+          return _.cloneDeep(_.mergeWith(state, newState, (objValue, srcValue) => {
+              if (_.isEmpty(srcValue)) {
+                return srcValue;
+              }
+              if (_.isArray(srcValue)) {
+                return srcValue;
+              }
+              if (_.isArray(objValue) && _.isObject(srcValue)) {
+                return srcValue;
+              }
+            })
+          );
         }
       }
     }
